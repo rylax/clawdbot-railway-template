@@ -1,6 +1,20 @@
 #!/bin/bash
 
+# ============================================================
+# Try to disable IPv6 (may fail without privileges, that's OK)
+# ============================================================
+if [ -w /proc/sys/net/ipv6/conf/all/disable_ipv6 ]; then
+  echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null || true
+  echo 1 > /proc/sys/net/ipv6/conf/default/disable_ipv6 2>/dev/null || true
+  echo "✓ IPv6 disabled"
+else
+  echo "⚠ Cannot disable IPv6 (no privileges), relying on gai.conf IPv4 preference"
+fi
+
+# ============================================================
 # Generate optimized proxychains config
+# ============================================================
+
 if [ -n "$PROXY_URL" ]; then
   # Parse proxy URL
   PROXY_HOST=$(echo "$PROXY_URL" | sed -E 's|https?://[^@]+@([^:]+):.*|\1|')
@@ -30,7 +44,7 @@ localnet 172.16.0.0/255.240.0.0
 localnet 192.168.0.0/255.255.0.0
 
 # ============================================================
-# IPv4 LLM API PROVIDERS (Exclude for speed)
+# LLM API PROVIDERS (Exclude for speed)
 # ============================================================
 
 # Anthropic Claude API
@@ -57,27 +71,14 @@ localnet 172.217.0.0/255.255.0.0
 localnet 149.154.160.0/255.255.224.0
 localnet 91.108.4.0/255.255.252.0
 
-# Microsoft Azure
+# Microsoft Azure (used by some AI services)
 localnet 13.64.0.0/255.192.0.0
 localnet 20.33.0.0/255.255.0.0
 localnet 40.64.0.0/255.192.0.0
 
-# AWS
+# AWS (various AI services)
 localnet 52.94.0.0/255.254.0.0
 localnet 54.231.0.0/255.255.0.0
-
-# ============================================================
-# IPv6 EXCLUSIONS (Exclude for speed)
-# ============================================================
-
-# Telegram IPv6
-localnet 2001:67c:4e8::/48
-
-# Cloudflare IPv6 (OpenRouter uses this)
-localnet 2606:4700::/32
-
-# Google IPv6
-localnet 2001:4860::/32
 
 [ProxyList]
 EOF
@@ -85,7 +86,7 @@ EOF
   echo "http $PROXY_IP $PROXY_PORT $PROXY_USER $PROXY_PASS" >> /etc/proxychains4.conf
 
   echo "✓ Proxychains configured: $PROXY_IP:$PROXY_PORT"
-  echo "✓ Excluded: IPv4 + IPv6 ranges for LLM APIs"
+  echo "✓ Excluded: Anthropic, Google, Cloudflare, Telegram, Azure, AWS"
   echo "✓ Proxied: WhatsApp only"
   exec proxychains4 node src/server.js
 else
