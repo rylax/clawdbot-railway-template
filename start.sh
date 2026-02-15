@@ -2,7 +2,7 @@
 
 # PROXY_URL format: http://user:pass@host:port
 if [ -n "$PROXY_URL" ]; then
-  # Resolve hostname to IP (proxychains needs numeric IP)
+  # Parse proxy URL
   PROXY_HOST=$(echo "$PROXY_URL" | sed -E 's|https?://[^@]+@([^:]+):.*|\1|')
   PROXY_PORT=$(echo "$PROXY_URL" | sed -E 's|.*:([0-9]+)$|\1|')
   PROXY_USER=$(echo "$PROXY_URL" | sed -E 's|https?://([^:]+):.*|\1|')
@@ -20,11 +20,15 @@ proxy_dns
 remote_dns_subnet 224
 tcp_read_time_out 15000
 tcp_connect_time_out 8000
+localnet 127.0.0.0/255.0.0.0
+localnet 10.0.0.0/255.0.0.0
+localnet 172.16.0.0/255.240.0.0
+localnet 192.168.0.0/255.255.0.0
 [ProxyList]
 http $PROXY_IP $PROXY_PORT $PROXY_USER $PROXY_PASS
 EOF
 
-  echo "Proxychains configured: $PROXY_IP:$PROXY_PORT"
+  echo "Proxychains configured: $PROXY_IP:$PROXY_PORT (localhost excluded)"
   exec proxychains4 node src/server.js
 else
   echo "No PROXY_URL set, running without proxy"
