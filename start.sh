@@ -46,10 +46,14 @@ fi
 # Provide a wacli wrapper:
 # * always uses persistent store (/data)
 # * uses proxychains ONLY when config exists
+# * forces cwd to / so store path doesn't get prefixed by /data/workspace
 # ------------------------------------------------------------
 cat > /usr/local/bin/wacli << 'WACLIEOF'
 #!/bin/bash
 set -euo pipefail
+
+# Force stable cwd so wacli doesn't prefix store with /data/workspace
+cd /
 
 STORE="${WACLI_STORE:-/data/.wacli}"
 
@@ -65,3 +69,5 @@ chmod +x /usr/local/bin/wacli
 # Start the Railway wrapper normally (NO proxychains here)
 # ------------------------------------------------------------
 exec node src/server.js
+
+
