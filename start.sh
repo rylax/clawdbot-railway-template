@@ -1,95 +1,67 @@
 #!/bin/bash
+set -euo pipefail
 
-# ============================================================
-# Try to disable IPv6 (may fail without privileges, that's OK)
-# ============================================================
-if [ -w /proc/sys/net/ipv6/conf/all/disable_ipv6 ]; then
-  echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null || true
-  echo 1 > /proc/sys/net/ipv6/conf/default/disable_ipv6 2>/dev/null || true
-  echo "✓ IPv6 disabled"
-else
-  echo "⚠ Cannot disable IPv6 (no privileges), relying on gai.conf IPv4 preference"
-fi
+# ------------------------------------------------------------
+# Build a proxychains config ONLY for wacli (not for the gateway)
+# ------------------------------------------------------------
+if [ -n "${PROXY_URL:-}" ]; then
+    PROXY_HOST="$(echo "$PROXY_URL" | sed -E 's|https?://[^@]+@([^:]+):.*|\1|')"
+    PROXY_PORT="$(echo "$PROXY_URL" | sed -E 's|.*:([0-9]+)$|\1|')"
+    PROXY_USER="$(echo "$PROXY_URL" | sed -E 's|https?://([^:]+):.*|\1|')"
+    PROXY_PASS="$(echo "$PROXY_URL" | sed -E 's|https?://[^:]+:([^@]+)@.*|\1|')"
 
-# ============================================================
-# Generate optimized proxychains config
-# ============================================================
+    # Prefer IPv4 (proxychains config expects an IP; your Decodo hostname may round-robin)
+    PROXY_IP="$(getent ahostsv4 "$PROXY_HOST" 2>/dev/null | awk '{print $1; exit}' || true)"
+    if [ -z "${PROXY_IP}" ]; then
+        PROXY_IP="$(getent hosts "$PROXY_HOST" | awk '{print $1; exit}' || true)"
+    fi
+    if [ -z "${PROXY_IP}" ]; then
+        PROXY_IP="$PROXY_HOST"
+    fi
 
-if [ -n "$PROXY_URL" ]; then
-  # Parse proxy URL
-  PROXY_HOST=$(echo "$PROXY_URL" | sed -E 's|https?://[^@]+@([^:]+):.*|\1|')
-  PROXY_PORT=$(echo "$PROXY_URL" | sed -E 's|.*:([0-9]+)$|\1|')
-  PROXY_USER=$(echo "$PROXY_URL" | sed -E 's|https?://([^:]+):.*|\1|')
-  PROXY_PASS=$(echo "$PROXY_URL" | sed -E 's|https?://[^:]+:([^@]+)@.*|\1|')
-  
-  # Resolve hostname to IP
-  PROXY_IP=$(getent hosts "$PROXY_HOST" | awk '{print $1}' | head -1)
-  if [ -z "$PROXY_IP" ]; then
-    PROXY_IP="$PROXY_HOST"
-  fi
-
-  cat > /etc/proxychains4.conf << 'EOF'
+    cat > /etc/proxychains4-wacli.conf << EOF
 strict_chain
+quiet_mode
 proxy_dns
 remote_dns_subnet 224
 tcp_read_time_out 15000
 tcp_connect_time_out 8000
 
-# ============================================================
-# LOCALHOST & PRIVATE NETWORKS (Always exclude)
-# ============================================================
+# Never proxy local traffic
 localnet 127.0.0.0/255.0.0.0
 localnet 10.0.0.0/255.0.0.0
 localnet 172.16.0.0/255.240.0.0
 localnet 192.168.0.0/255.255.0.0
 
-# ============================================================
-# LLM API PROVIDERS (Exclude for speed)
-# ============================================================
-
-# Anthropic Claude API
-localnet 160.79.104.0/255.255.248.0
-
-# Cloudflare (used by OpenRouter, many AI services)
-localnet 104.16.0.0/255.248.0.0
-localnet 104.24.0.0/255.252.0.0
-localnet 108.162.192.0/255.255.192.0
-localnet 172.64.0.0/255.248.0.0
-localnet 173.245.48.0/255.255.240.0
-localnet 162.158.0.0/255.254.0.0
-
-# Google Cloud (Gemini, Google AI APIs)
-localnet 34.64.0.0/255.192.0.0
-localnet 35.185.0.0/255.255.0.0
-localnet 35.186.0.0/255.255.0.0
-localnet 35.187.0.0/255.255.0.0
-localnet 35.188.0.0/255.252.0.0
-localnet 142.250.0.0/255.254.0.0
-localnet 172.217.0.0/255.255.0.0
-
-# Telegram Bot API
-localnet 149.154.160.0/255.255.224.0
-localnet 91.108.4.0/255.255.252.0
-
-# Microsoft Azure (used by some AI services)
-localnet 13.64.0.0/255.192.0.0
-localnet 20.33.0.0/255.255.0.0
-localnet 40.64.0.0/255.192.0.0
-
-# AWS (various AI services)
-localnet 52.94.0.0/255.254.0.0
-localnet 54.231.0.0/255.255.0.0
-
 [ProxyList]
+http $PROXY_IP $PROXY_PORT $PROXY_USER $PROXY_PASS
 EOF
 
-  echo "http $PROXY_IP $PROXY_PORT $PROXY_USER $PROXY_PASS" >> /etc/proxychains4.conf
-
-  echo "✓ Proxychains configured: $PROXY_IP:$PROXY_PORT"
-  echo "✓ Excluded: Anthropic, Google, Cloudflare, Telegram, Azure, AWS"
-  echo "✓ Proxied: WhatsApp only"
-  exec proxychains4 node src/server.js
+    echo "✓ wacli proxychains configured: $PROXY_IP:$PROXY_PORT"
 else
-  echo "✗ No PROXY_URL set, running without proxy"
-  exec node src/server.js
+    echo "⚠ PROXY_URL not set; wacli will run without proxy"
 fi
+
+# ------------------------------------------------------------
+# Provide a wacli wrapper:
+# * always uses persistent store (/data)
+# * uses proxychains ONLY when config exists
+# ------------------------------------------------------------
+cat > /usr/local/bin/wacli << 'WACLIEOF'
+#!/bin/bash
+set -euo pipefail
+
+STORE="${WACLI_STORE:-/data/.wacli}"
+
+if [ -f /etc/proxychains4-wacli.conf ]; then
+    exec proxychains4 -q -f /etc/proxychains4-wacli.conf /root/go/bin/wacli-real --store "$STORE" "$@"
+else
+    exec /root/go/bin/wacli-real --store "$STORE" "$@"
+fi
+WACLIEOF
+chmod +x /usr/local/bin/wacli
+
+# ------------------------------------------------------------
+# Start the Railway wrapper normally (NO proxychains here)
+# ------------------------------------------------------------
+exec node src/server.js
