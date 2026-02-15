@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Generate proxychains config from env var if set
+# Generate optimized proxychains config
 if [ -n "$PROXY_URL" ]; then
   # Parse proxy URL
   PROXY_HOST=$(echo "$PROXY_URL" | sed -E 's|https?://[^@]+@([^:]+):.*|\1|')
@@ -30,7 +30,7 @@ localnet 172.16.0.0/255.240.0.0
 localnet 192.168.0.0/255.255.0.0
 
 # ============================================================
-# LLM API PROVIDERS (Exclude for speed)
+# IPv4 LLM API PROVIDERS (Exclude for speed)
 # ============================================================
 
 # Anthropic Claude API
@@ -57,24 +57,38 @@ localnet 172.217.0.0/255.255.0.0
 localnet 149.154.160.0/255.255.224.0
 localnet 91.108.4.0/255.255.252.0
 
-# Microsoft Azure (used by some AI services)
+# Microsoft Azure
 localnet 13.64.0.0/255.192.0.0
 localnet 20.33.0.0/255.255.0.0
 localnet 40.64.0.0/255.192.0.0
 
-# AWS (various AI services)
+# AWS
 localnet 52.94.0.0/255.254.0.0
 localnet 54.231.0.0/255.255.0.0
+
+# ============================================================
+# IPv6 EXCLUSIONS (Exclude for speed)
+# ============================================================
+
+# Telegram IPv6
+localnet 2001:67c:4e8::/48
+
+# Cloudflare IPv6 (OpenRouter uses this)
+localnet 2606:4700::/32
+
+# Google IPv6
+localnet 2001:4860::/32
 
 [ProxyList]
 EOF
 
   echo "http $PROXY_IP $PROXY_PORT $PROXY_USER $PROXY_PASS" >> /etc/proxychains4.conf
 
-  echo "Proxychains configured: $PROXY_IP:$PROXY_PORT"
-  echo "Excluded: Localhost, Anthropic, Google, Cloudflare, Telegram, Azure, AWS"
+  echo "✓ Proxychains configured: $PROXY_IP:$PROXY_PORT"
+  echo "✓ Excluded: IPv4 + IPv6 ranges for LLM APIs"
+  echo "✓ Proxied: WhatsApp only"
   exec proxychains4 node src/server.js
 else
-  echo "No PROXY_URL set, running without proxy"
+  echo "✗ No PROXY_URL set, running without proxy"
   exec node src/server.js
 fi
