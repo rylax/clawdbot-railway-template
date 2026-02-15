@@ -2,6 +2,15 @@
 set -euo pipefail
 
 # ------------------------------------------------------------
+# Always ensure the persistent wacli store exists (Railway volume)
+# ------------------------------------------------------------
+STORE="${WACLI_STORE:-/data/.wacli}"
+mkdir -p "$STORE"
+chmod 700 "$STORE" || true
+
+echo "✓ WACLI_STORE=$STORE (ensured directory exists)"
+
+# ------------------------------------------------------------
 # Build a proxychains config ONLY for wacli (not for the gateway)
 # ------------------------------------------------------------
 if [ -n "${PROXY_URL:-}" ]; then
@@ -10,7 +19,7 @@ if [ -n "${PROXY_URL:-}" ]; then
     PROXY_USER="$(echo "$PROXY_URL" | sed -E 's|https?://([^:]+):.*|\1|')"
     PROXY_PASS="$(echo "$PROXY_URL" | sed -E 's|https?://[^:]+:([^@]+)@.*|\1|')"
 
-    # Prefer IPv4 (proxychains config expects an IP; your Decodo hostname may round-robin)
+    # Prefer IPv4 (proxychains config expects an IP)
     PROXY_IP="$(getent ahostsv4 "$PROXY_HOST" 2>/dev/null | awk '{print $1; exit}' || true)"
     if [ -z "${PROXY_IP}" ]; then
         PROXY_IP="$(getent hosts "$PROXY_HOST" | awk '{print $1; exit}' || true)"
@@ -39,23 +48,25 @@ EOF
 
     echo "✓ wacli proxychains configured: $PROXY_IP:$PROXY_PORT"
 else
+    rm -f /etc/proxychains4-wacli.conf 2>/dev/null || true
     echo "⚠ PROXY_URL not set; wacli will run without proxy"
 fi
 
 # ------------------------------------------------------------
 # Provide a wacli wrapper:
-# * always uses persistent store (/data)
-# * uses proxychains ONLY when config exists
-# * forces cwd to / so store path doesn't get prefixed by /data/workspace
+# - forces cwd to / (prevents /data/workspace prefix weirdness)
+# - always uses persistent store
+# - uses proxychains ONLY when config exists
 # ------------------------------------------------------------
 cat > /usr/local/bin/wacli << 'WACLIEOF'
 #!/bin/bash
 set -euo pipefail
 
-# Force stable cwd so wacli doesn't prefix store with /data/workspace
 cd /
 
 STORE="${WACLI_STORE:-/data/.wacli}"
+mkdir -p "$STORE"
+chmod 700 "$STORE" || true
 
 if [ -f /etc/proxychains4-wacli.conf ]; then
     exec proxychains4 -q -f /etc/proxychains4-wacli.conf /root/go/bin/wacli-real --store "$STORE" "$@"
@@ -65,9 +76,9 @@ fi
 WACLIEOF
 chmod +x /usr/local/bin/wacli
 
+echo "✓ /usr/local/bin/wacli wrapper installed"
+
 # ------------------------------------------------------------
 # Start the Railway wrapper normally (NO proxychains here)
 # ------------------------------------------------------------
 exec node src/server.js
-
-
