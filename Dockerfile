@@ -2,6 +2,8 @@
 # Build OpenClaw from source (keeps Railway builds reliable)
 # ============================================================
 FROM node:22-bookworm AS openclaw-build
+# to make telegram respond faster due to ipv6 network hangs
+ENV NODE_OPTIONS="--dns-result-order=ipv4first"  
 
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -15,7 +17,7 @@ ENV PATH="/root/.bun/bin:${PATH}"
 RUN corepack enable
 
 WORKDIR /openclaw
-ARG OPENCLAW_GIT_REF=v2026.2.9
+ARG OPENCLAW_GIT_REF=v2026.2.19
 RUN git clone --depth 1 --branch "${OPENCLAW_GIT_REF}" https://github.com/openclaw/openclaw.git .
 
 # Patch: relax version requirements for workspace/unpublished refs
